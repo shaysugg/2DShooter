@@ -3,13 +3,14 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
-#include "gif_player.h"
+#include "frame_animator.h"
 
-#define WWidth 650
+#define WWidth 950
 #define WHeight 450
 
 #define COVER_COUNT 3
 #define BULLETS_MAX_COUNT 100
+#define ENEMIES_MAX_COUNT 50
 
 const double coverMargin = 10;
 
@@ -29,8 +30,7 @@ enum MovementDirection
 
 struct Cover
 {
-	double width;
-	Vector2 pos;
+	Rectangle rec;
 };
 
 struct Aiming
@@ -43,25 +43,21 @@ struct Aiming
 struct Character
 {
 	const double speed;
-	const double width;
 	enum CharacterMovement movement;
 	enum MovementDirection direction;
 	Vector2 pos;
 	struct Cover behindCover;
 	struct Aiming *aiming;
-	char *animPath;
-	GifPlayer *anim;
+	FrameAnimator fa;
 } character = {
 	.movement = idle,
 	.speed = 3,
-	.width = 20,
-	.pos = {550, WHeight / 2},
 };
 
 struct Cover covers[COVER_COUNT] = {
-	{20, {200, WHeight / 2 - 20}},
-	{20, {130, WHeight / 2 - 20}},
-	{20, {420, WHeight / 2 - 20}},
+	(struct Cover){.rec = {200, WHeight / 2 - 20, 20, 30}},
+	(struct Cover){.rec = {350, WHeight / 2 - 20, 20, 30}},
+	(struct Cover){.rec = {450, WHeight / 2 - 20, 20, 30}},
 };
 
 struct Bullet
@@ -75,6 +71,24 @@ struct Bullet
 struct Bullet bullets[BULLETS_MAX_COUNT] = {};
 int bulletsCount = 0;
 
+enum EnemyStatus
+{
+	alive,
+	dead
+};
+
+struct Enemy
+{
+	Vector2 pos;
+	FrameAnimator fa;
+	enum EnemyStatus status;
+};
+
+struct Enemy enemies[ENEMIES_MAX_COUNT] = {};
+int enemiesCount = 0;
+
+void LoadAnimations();
+
 void HandleCharacterMovements();
 void HandleCharacterAiming();
 void HandleAnimationOfCharacter();
@@ -87,6 +101,9 @@ void DrawCover(struct Cover);
 void PutCharacterInCover(struct Character *, struct Cover);
 void PassCharacterOverCover(struct Character *, struct Cover);
 
+Rectangle GetCharacterRectangle(struct Character character);
+float DistanceBetweenRectanglesX(Rectangle rec1, Rectangle rec2);
+
 int main()
 {
 	Camera2D camera = {0};
@@ -95,6 +112,14 @@ int main()
 	camera.zoom = 1;
 
 	InitWindow(WWidth, WHeight, "2DShooter");
+
+	// character.faWalking = LoadFrameAnimator("resources/character-walking.png", 6, 6);
+	LoadAnimations();
+	character.pos = (Vector2){50, GetScreenHeight() - GetCharacterRectangle(character).height};
+
+	enemiesCount = 1;
+	enemies[0] = (struct Enemy){.pos = {300, 300}, .status = alive};
+
 	SetTargetFPS(60);
 
 	while (!WindowShouldClose())
@@ -103,8 +128,15 @@ int main()
 		HandleCharacterAiming();
 		HandleCharacterShooting();
 		HandleBullets();
-
 		HandleAnimationOfCharacter();
+
+		// for (int i = 0; i < bulletsCount; i++)
+		// {
+		// 	for (int j = 0; j < enemiesCount; j++)
+		// 	{
+		// 		GetCollisionRec(enemies[j].pos.x, bullets[i])
+		// 	}
+		// }
 
 		BeginDrawing();
 
@@ -125,61 +157,52 @@ int main()
 		for (int i = 0; i < bulletsCount; i++)
 			DrawCircleV(bullets[i].pos, 2, RED);
 
+		for (int i = 0; i < enemiesCount; i++)
+		{
+			DrawRectangle(enemies[i].pos.x, enemies[i].pos.y, 30, 20, enemies[i].status == alive ? GREEN : BROWN);
+		}
+
 		EndDrawing();
 	}
 
-	UnloadGifPlayer(*character.anim);
+	UnloadTexture(character.fa.texture);
 	CloseWindow();
+}
+
+void LoadAnimations()
+{
+	character.fa = LoadFrameAnimator("resources/character.png", 3, 4, 6);
 }
 
 void HandleAnimationOfCharacter()
 {
-	char *animPath;
 	switch (character.movement)
 	{
 	case idle:
-		animPath = "resources/character-idle.gif";
+		character.fa.currentRow = 1;
 		break;
 	case moving:
-		animPath = "resources/character-walking.gif";
+		character.fa.currentRow = 2;
 		break;
-	case cover:
-		animPath = "resources/character-idle.gif";
-		break;
-	case blocked:
-		animPath = "resources/character-idle.gif";
+	default:
+		character.fa.currentRow = 2;
 		break;
 	}
 	if (character.aiming != NULL)
-		animPath = "resources/character-idle.gif";
+		character.fa.currentRow = 2;
 
-	// Iniit and change if mode changed
-	//  Not really good performant wise
-	if (character.animPath == NULL ||
-		strcmp(character.animPath, animPath))
-	{
-		free(character.anim);
-		character.animPath = malloc(strlen(animPath));
-		strcpy(character.animPath, animPath);
-		puts(animPath);
-		character.anim = LoadGifPlayer(animPath, 9);
-	}
-	// puts(animPath);
-	// puts(character.animPath);
-	// printf("%d", strcmp(character.animPath, animPath));
+	UpdateFrameAnimator(&character.fa);
 }
 
 void DrawCharacter()
 {
-	if (character.anim == NULL)
-		return;
-	GoToNextFrame(character.anim);
-	DrawCurrentFrame(*character.anim, character.pos.x, character.pos.y, WHITE);
+	DrawRectangleRec(GetCharacterRectangle(character), YELLOW);
+	DrawFrameAnimator(character.fa, character.pos);
 }
 
 void DrawCover(struct Cover cover)
 {
-	DrawRectangle(cover.pos.x, cover.pos.y, cover.width, 60, DARKGRAY);
+	DrawRectangle(cover.rec.x, cover.rec.y, cover.rec.width, 60, DARKGRAY);
 }
 
 void HandleCharacterMovements()
@@ -187,7 +210,7 @@ void HandleCharacterMovements()
 	// out of cover
 	if (IsKeyPressed(KEY_C) && character.movement == cover)
 	{
-		if (character.pos.x < character.behindCover.pos.x)
+		if (character.pos.x < character.behindCover.rec.x)
 			character.pos.x -= coverMargin;
 		else
 			character.pos.x += coverMargin;
@@ -205,18 +228,20 @@ void HandleCharacterMovements()
 	// check if covered or blocked
 	for (int i = 0; i < COVER_COUNT; i++)
 	{
-		if (fabs(character.pos.x - covers[i].pos.x) < character.width)
+		// CheckCollisionRecs((Rectangle){character.pos.x, character.pos.y, character.fa.texture.width, character.fa.texture.height}, covers[i].rec)
+
+		if (CheckCollisionRecs((Rectangle){character.pos.x, character.pos.y, character.fa.currentRec.width, character.fa.currentRec.height}, covers[i].rec))
 		{
 			character.movement = blocked;
 			character.behindCover = covers[i];
 			PutCharacterInCover(&character, covers[i]);
 		}
 
-		if (fabs(character.pos.x - covers[i].pos.x) < character.width + coverMargin && IsKeyPressed(KEY_C))
+		if (DistanceBetweenRectanglesX(GetCharacterRectangle(character), covers[i].rec) < coverMargin && IsKeyPressed(KEY_C))
 		{
 			character.movement = cover;
 			character.behindCover = covers[i];
-			PutCharacterInCover(&character, covers[i]);
+			PutCharacterInCover(&character, character.behindCover);
 		}
 	}
 
@@ -226,7 +251,7 @@ void HandleCharacterMovements()
 
 	if (IsKeyDown(KEY_LEFT) &&
 		character.pos.x > 0 &&
-		!(character.movement == blocked && character.pos.x > character.behindCover.pos.x) &&
+		!(character.movement == blocked && character.pos.x > character.behindCover.rec.x) &&
 		character.movement != cover)
 	{
 		character.pos.x -= character.speed;
@@ -235,7 +260,7 @@ void HandleCharacterMovements()
 	}
 	else if (IsKeyDown(KEY_RIGHT) &&
 			 character.pos.x < WWidth &&
-			 !(character.movement == blocked && character.pos.x < character.behindCover.pos.x) &&
+			 !(character.movement == blocked && character.pos.x < character.behindCover.rec.x) &&
 			 character.movement != cover)
 	{
 		character.pos.x += character.speed;
@@ -327,15 +352,34 @@ void HandleBullets()
 
 void PutCharacterInCover(struct Character *character, struct Cover cover)
 {
-	if (character->pos.x < cover.pos.x)
-		character->pos.x = cover.pos.x - character->width / 2 - cover.width / 2;
+
+	if (character->pos.x < cover.rec.x)
+		character->pos.x = cover.rec.x - character->fa.currentRec.width;
 	else
-		character->pos.x = cover.pos.x + character->width / 2 + cover.width / 2;
+		character->pos.x = cover.rec.x + cover.rec.width;
 }
 void PassCharacterOverCover(struct Character *character, struct Cover cover)
 {
-	if (character->pos.x < character->behindCover.pos.x)
-		character->pos.x = character->behindCover.pos.x + character->width;
+	if (character->pos.x < cover.rec.x)
+		character->pos.x = cover.rec.x + cover.rec.width;
 	else
-		character->pos.x = character->behindCover.pos.x - character->width;
+		character->pos.x = cover.rec.x - character->fa.currentRec.width;
+}
+
+Rectangle GetCharacterRectangle(struct Character character)
+{
+	return (Rectangle){character.pos.x, character.pos.y, character.fa.currentRec.width, character.fa.currentRec.height};
+}
+
+float DistanceBetweenRectanglesX(Rectangle rec1, Rectangle rec2)
+{
+	if (CheckCollisionRecs(rec1, rec2))
+	{
+		return 0;
+	}
+
+	if (rec1.x < rec2.x)
+		return rec2.x - (rec1.x + rec1.width);
+	else
+		return rec1.x - (rec2.x + rec2.width);
 }

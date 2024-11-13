@@ -9,6 +9,8 @@ set(SOURCE_FILES
     main.c
     gif_player.c
     gif_player.h
+    frame_animator.h
+    frame_animator.c
 )
 
 add_executable(${PROJECT_NAME} ${SOURCE_FILES})
