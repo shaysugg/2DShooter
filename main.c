@@ -14,94 +14,96 @@
 
 const double coverMargin = 10;
 
-enum CharacterMovement
+typedef enum CharacterMovement
 {
 	idle,
 	moving,
 	cover,
 	blocked,
-};
+} CharacterMovement;
 
-enum MovementDirection
+typedef enum MovementDirection
 {
 	left,
 	right
-};
+} MovementDirection;
 
-struct Cover
+typedef struct Cover
 {
 	Rectangle rec;
-};
+} Cover;
 
-struct Aiming
+typedef struct Aiming
 {
 	Vector2 endPos;
 	float angle;
 	float lentgh;
-};
+} Aiming;
 
-struct Character
+typedef struct Character
 {
 	const double speed;
-	enum CharacterMovement movement;
-	enum MovementDirection direction;
+	CharacterMovement movement;
+	MovementDirection direction;
 	Vector2 pos;
-	struct Cover behindCover;
-	struct Aiming *aiming;
+	Cover behindCover;
+	Aiming *aiming;
 	FrameAnimator fa;
-} character = {
+} Character;
+
+Character character = {
 	.movement = idle,
 	.speed = 3,
 };
 
-struct Cover covers[COVER_COUNT] = {
-	(struct Cover){.rec = {200, WHeight / 2 - 20, 20, 30}},
-	(struct Cover){.rec = {350, WHeight / 2 - 20, 20, 30}},
-	(struct Cover){.rec = {450, WHeight / 2 - 20, 20, 30}},
-};
+Cover covers[COVER_COUNT];
 
-struct Bullet
+typedef struct Bullet
 {
 	Vector2 pos;
 	float angle;
 	float distance;
 	float speed;
-};
+} Bullet;
 
-struct Bullet bullets[BULLETS_MAX_COUNT] = {};
+Bullet bullets[BULLETS_MAX_COUNT] = {};
 int bulletsCount = 0;
 
-enum EnemyStatus
+typedef enum EnemyStatus
 {
 	alive,
 	dead
-};
+} EnemyStatus;
 
-struct Enemy
+typedef struct Enemy
 {
 	Vector2 pos;
 	FrameAnimator fa;
-	enum EnemyStatus status;
-};
+	EnemyStatus status;
+	int deathTime;
+} Enemy;
 
-struct Enemy enemies[ENEMIES_MAX_COUNT] = {};
+Enemy enemies[ENEMIES_MAX_COUNT] = {};
 int enemiesCount = 0;
 
-void LoadAnimations();
+void LoadResources();
+void LoadInitial();
 
 void HandleCharacterMovements();
 void HandleCharacterAiming();
-void HandleAnimationOfCharacter();
+void UpdateAnimations();
 void HandleBullets();
 void HandleCharacterShooting();
+void HandleEnemies();
 
 void DrawCharacter();
-void DrawCover(struct Cover);
+void DrawEnemy(Enemy);
+void DrawCover(Cover);
 
-void PutCharacterInCover(struct Character *, struct Cover);
-void PassCharacterOverCover(struct Character *, struct Cover);
+void PutCharacterInCover(Character *, Cover);
+void PassCharacterOverCover(Character *, Cover);
 
-Rectangle GetCharacterRectangle(struct Character character);
+Rectangle GetCharacterRectangle(Character character);
 float DistanceBetweenRectanglesX(Rectangle rec1, Rectangle rec2);
 
 int main()
@@ -111,16 +113,11 @@ int main()
 	camera.rotation = 0;
 	camera.zoom = 1;
 
+	SetTargetFPS(60);
 	InitWindow(WWidth, WHeight, "2DShooter");
 
-	// character.faWalking = LoadFrameAnimator("resources/character-walking.png", 6, 6);
-	LoadAnimations();
-	character.pos = (Vector2){50, GetScreenHeight() - GetCharacterRectangle(character).height};
-
-	enemiesCount = 1;
-	enemies[0] = (struct Enemy){.pos = {300, 300}, .status = alive};
-
-	SetTargetFPS(60);
+	LoadInitial();
+	LoadResources();
 
 	while (!WindowShouldClose())
 	{
@@ -128,15 +125,8 @@ int main()
 		HandleCharacterAiming();
 		HandleCharacterShooting();
 		HandleBullets();
-		HandleAnimationOfCharacter();
-
-		// for (int i = 0; i < bulletsCount; i++)
-		// {
-		// 	for (int j = 0; j < enemiesCount; j++)
-		// 	{
-		// 		GetCollisionRec(enemies[j].pos.x, bullets[i])
-		// 	}
-		// }
+		HandleEnemies();
+		UpdateAnimations();
 
 		BeginDrawing();
 
@@ -158,9 +148,7 @@ int main()
 			DrawCircleV(bullets[i].pos, 2, RED);
 
 		for (int i = 0; i < enemiesCount; i++)
-		{
-			DrawRectangle(enemies[i].pos.x, enemies[i].pos.y, 30, 20, enemies[i].status == alive ? GREEN : BROWN);
-		}
+			DrawEnemy(enemies[i]);
 
 		EndDrawing();
 	}
@@ -169,12 +157,26 @@ int main()
 	CloseWindow();
 }
 
-void LoadAnimations()
+void LoadInitial()
 {
-	character.fa = LoadFrameAnimator("resources/character.png", 3, 4, 6);
+	character.pos = (Vector2){50, GetScreenHeight() / 2 - GetCharacterRectangle(character).height};
+
+	enemiesCount = 5;
+	for (int i = 0; i < enemiesCount; i++)
+		enemies[i] = (Enemy){.pos = {(i + 1) * 120, GetScreenHeight() / 2}, .status = alive};
+
+	for (int i = 0; i < COVER_COUNT; i++)
+		covers[i] = (Cover){(Rectangle){(i + 1) * 100, GetScreenHeight() / 2 - 50, 30, 50}};
 }
 
-void HandleAnimationOfCharacter()
+void LoadResources()
+{
+	character.fa = LoadFrameAnimator("resources/character.png", 3, 4, 6);
+	for (int e = 0; e < enemiesCount; e++)
+		enemies[e].fa = LoadFrameAnimator("resources/enemy.png", 3, 4, 6);
+}
+
+void UpdateAnimations()
 {
 	switch (character.movement)
 	{
@@ -192,6 +194,9 @@ void HandleAnimationOfCharacter()
 		character.fa.currentRow = 2;
 
 	UpdateFrameAnimator(&character.fa);
+
+	for (int e = 0; e < enemiesCount; e++)
+		UpdateFrameAnimator(&enemies[e].fa);
 }
 
 void DrawCharacter()
@@ -200,9 +205,15 @@ void DrawCharacter()
 	DrawFrameAnimator(character.fa, character.pos);
 }
 
-void DrawCover(struct Cover cover)
+void DrawCover(Cover cover)
 {
 	DrawRectangle(cover.rec.x, cover.rec.y, cover.rec.width, 60, DARKGRAY);
+}
+
+void DrawEnemy(Enemy enemy)
+{
+	DrawRectangleRec((Rectangle){enemy.pos.x, enemy.pos.y, enemy.fa.currentRec.width, enemy.fa.currentRec.height}, enemy.status == dead ? RED : YELLOW);
+	DrawFrameAnimator(enemy.fa, enemy.pos);
 }
 
 void HandleCharacterMovements()
@@ -276,7 +287,7 @@ void HandleCharacterAiming()
 		IsKeyDown(aimingKey) &&
 		character.movement == cover)
 	{
-		character.aiming = malloc(sizeof(struct Aiming));
+		character.aiming = malloc(sizeof(Aiming));
 		character.aiming->angle = character.direction == right ? 0 : 180;
 		character.aiming->lentgh = 100;
 	}
@@ -338,6 +349,7 @@ void HandleBullets()
 		bullets[i].distance += bullets[i].speed;
 		bullets[i].pos.x = cosf(bullets[i].angle * DEG2RAD) * bullets[i].distance + character.pos.x;
 		bullets[i].pos.y = sinf(bullets[i].angle * DEG2RAD) * bullets[i].distance + character.pos.y;
+
 		// check if it can be removed from bullets cache
 		if (bullets[i].pos.x > WWidth || bullets[i].pos.y > WHeight)
 		{
@@ -347,10 +359,43 @@ void HandleBullets()
 
 			bulletsCount--;
 		}
+
+		// check if bullets collide with an enemy
+		for (int j = 0; j < enemiesCount; j++)
+		{
+			if (CheckCollisionCircleRec(bullets[i].pos, 5, (Rectangle){enemies[j].pos.x, enemies[j].pos.y, 20, 30}))
+			{
+				// remove bullet
+				if (i != bulletsCount - 1)
+					for (int j = i + 1; j < bulletsCount; j++)
+						bullets[j - 1] = bullets[j];
+
+				bulletsCount--;
+				// remove enemy
+				enemies[j].status = dead;
+				enemies[j].deathTime = 5 * 60;
+			}
+		}
 	}
 }
 
-void PutCharacterInCover(struct Character *character, struct Cover cover)
+void HandleEnemies()
+{
+	for (int i = 0; i < enemiesCount; i++)
+	{
+		if (enemies[i].deathTime > 0 && enemies[i].status == dead)
+			enemies[i].deathTime--;
+
+		if (enemies[i].deathTime <= 0 && enemies[i].status == dead)
+		{
+			if (i != enemiesCount - 1)
+				for (int j = i + 1; j < enemiesCount; j++)
+					enemies[j - 1] = enemies[j];
+		};
+	}
+}
+
+void PutCharacterInCover(Character *character, Cover cover)
 {
 
 	if (character->pos.x < cover.rec.x)
@@ -358,7 +403,7 @@ void PutCharacterInCover(struct Character *character, struct Cover cover)
 	else
 		character->pos.x = cover.rec.x + cover.rec.width;
 }
-void PassCharacterOverCover(struct Character *character, struct Cover cover)
+void PassCharacterOverCover(Character *character, Cover cover)
 {
 	if (character->pos.x < cover.rec.x)
 		character->pos.x = cover.rec.x + cover.rec.width;
@@ -366,7 +411,7 @@ void PassCharacterOverCover(struct Character *character, struct Cover cover)
 		character->pos.x = cover.rec.x - character->fa.currentRec.width;
 }
 
-Rectangle GetCharacterRectangle(struct Character character)
+Rectangle GetCharacterRectangle(Character character)
 {
 	return (Rectangle){character.pos.x, character.pos.y, character.fa.currentRec.width, character.fa.currentRec.height};
 }
