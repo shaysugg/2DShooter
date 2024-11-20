@@ -1,9 +1,9 @@
 cmake_minimum_required(VERSION 3.10)
 project(2DShooter2)
 
-find_path(RL_INCLUDE_DIR NAMES raylib.h PATHS /opt/homebrew/opt/raylib/include)
+find_path(RL_INCLUDE_DIR NAMES raylib.h PATHS ./raylib/include)
 include_directories(${RL_INCLUDE_DIR})
-find_library(RL_LIBRARY NAMES raylib PATHS /opt/homebrew/opt/raylib/lib)
+find_library(RL_LIBRARY NAMES raylib PATHS ./raylib/lib)
 
 set(SOURCE_FILES
     main.c
