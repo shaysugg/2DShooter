@@ -22,14 +22,14 @@ void DrawFrameAnimator(FrameAnimator fa, Vector2 position)
     DrawTextureRec(fa.texture, fa.currentRec, position, WHITE);
 }
 
-FrameAnimator LoadFrameAnimator(char *texturePath, int framesCount, int rowsCount, int framesSpeed)
+FrameAnimator LoadFrameAnimator(char *texturePath, int framesCount, int rowsCount, int currentRow, int framesSpeed)
 {
     Texture2D texture = LoadTexture(texturePath); // Texture loading
     FrameAnimator fa = {.texture = texture,
                         .currentFrame = 0,
                         .framesCount = framesCount,
                         .framesCounter = 0,
-                        .currentRow = 1,
+                        .currentRow = currentRow,
                         .rowsCount = rowsCount,
                         .framesSpeed = framesSpeed,
                         .currentRec = {0.0f, 0.0f, (float)texture.width / framesCount, (float)texture.height / rowsCount}};

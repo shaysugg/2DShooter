@@ -18,6 +18,6 @@ typedef struct FrameAnimator
 void UpdateFrameAnimator(FrameAnimator *fa);
 
 void DrawFrameAnimator(FrameAnimator fa, Vector2 position);
-FrameAnimator LoadFrameAnimator(char *texturePath, int framesCount, int rowsCount, int framesSpeed);
+FrameAnimator LoadFrameAnimator(char *texturePath, int framesCount, int rowsCount, int currentRow, int framesSpeed);
 
 #endif

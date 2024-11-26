@@ -7,8 +7,6 @@ find_library(RL_LIBRARY NAMES raylib PATHS ./raylib/lib)
 
 set(SOURCE_FILES
     main.c
-    gif_player.c
-    gif_player.h
     frame_animator.h
     frame_animator.c
 )

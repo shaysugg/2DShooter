@@ -42,19 +42,19 @@ typedef struct Aiming
 
 typedef struct Character
 {
-	const double speed;
+	float speed;
+	Vector2 pos;
+	float width;
+	float height;
 	CharacterMovement movement;
 	MovementDirection direction;
-	Vector2 pos;
 	Cover behindCover;
 	Aiming *aiming;
 	FrameAnimator fa;
+	int health;
 } Character;
 
-Character character = {
-	.movement = idle,
-	.speed = 3,
-};
+Character character;
 
 Cover covers[COVER_COUNT];
 
@@ -78,9 +78,12 @@ typedef enum EnemyStatus
 typedef struct Enemy
 {
 	Vector2 pos;
+	float width;
+	float height;
 	FrameAnimator fa;
 	EnemyStatus status;
 	int deathTime;
+	int health;
 } Enemy;
 
 Enemy enemies[ENEMIES_MAX_COUNT] = {};
@@ -159,21 +162,44 @@ int main()
 
 void LoadInitial()
 {
-	character.pos = (Vector2){50, GetScreenHeight() / 2 - GetCharacterRectangle(character).height};
+	float groundPosV = GetScreenHeight() / 2 + 100;
+	float cHeight = 255 / 4;
+	float cWidth = 175 / 3;
+	character = (Character){
+		.pos = (Vector2){
+			50,
+			groundPosV - cHeight,
+		},
+		.movement = idle,
+		.speed = 3,
+		.width = cWidth,
+		.height = cHeight,
+		.health = 5};
 
 	enemiesCount = 5;
 	for (int i = 0; i < enemiesCount; i++)
-		enemies[i] = (Enemy){.pos = {(i + 1) * 120, GetScreenHeight() / 2}, .status = alive};
+		enemies[i] = (Enemy){
+			.pos = (Vector2){
+				(i + 1) * 120,
+				groundPosV - cHeight,
+			},
+			.status = alive,
+			.deathTime = -1,
+			.width = cWidth,
+			.height = cHeight,
+			.health = 1};
 
+	float coverHeight = 50;
+	float coverWidth = 20;
 	for (int i = 0; i < COVER_COUNT; i++)
-		covers[i] = (Cover){(Rectangle){(i + 1) * 100, GetScreenHeight() / 2 - 50, 30, 50}};
+		covers[i] = (Cover){(Rectangle){(i + 1) * 100, groundPosV - coverHeight, coverWidth, coverHeight}};
 }
 
 void LoadResources()
 {
-	character.fa = LoadFrameAnimator("resources/character.png", 3, 4, 6);
+	character.fa = LoadFrameAnimator("resources/character.png", 3, 4, 1, 6);
 	for (int e = 0; e < enemiesCount; e++)
-		enemies[e].fa = LoadFrameAnimator("resources/enemy.png", 3, 4, 6);
+		enemies[e].fa = LoadFrameAnimator("resources/enemy.png", 3, 4, 3, 6);
 }
 
 void UpdateAnimations()
@@ -181,17 +207,17 @@ void UpdateAnimations()
 	switch (character.movement)
 	{
 	case idle:
-		character.fa.currentRow = 1;
+		character.fa.currentRow = 0;
 		break;
 	case moving:
-		character.fa.currentRow = 2;
+		character.fa.currentRow = character.direction == left ? 1 : 2;
 		break;
 	default:
-		character.fa.currentRow = 2;
+		character.fa.currentRow = 0;
 		break;
 	}
 	if (character.aiming != NULL)
-		character.fa.currentRow = 2;
+		character.fa.currentRow = 0;
 
 	UpdateFrameAnimator(&character.fa);
 
@@ -239,7 +265,6 @@ void HandleCharacterMovements()
 	// check if covered or blocked
 	for (int i = 0; i < COVER_COUNT; i++)
 	{
-		// CheckCollisionRecs((Rectangle){character.pos.x, character.pos.y, character.fa.texture.width, character.fa.texture.height}, covers[i].rec)
 
 		if (CheckCollisionRecs((Rectangle){character.pos.x, character.pos.y, character.fa.currentRec.width, character.fa.currentRec.height}, covers[i].rec))
 		{
@@ -320,8 +345,8 @@ void HandleCharacterShooting()
 	{
 		struct Bullet bullet = {
 			.distance = 0,
-			.pos = character.pos,
-			.speed = 4};
+			.pos = (Vector2){character.pos.x + character.width, character.pos.y + character.height / 2},
+			.speed = 8};
 
 		if (character.aiming != NULL)
 		{
@@ -361,9 +386,10 @@ void HandleBullets()
 		}
 
 		// check if bullets collide with an enemy
-		for (int j = 0; j < enemiesCount; j++)
+		for (int e = 0; e < enemiesCount; e++)
 		{
-			if (CheckCollisionCircleRec(bullets[i].pos, 5, (Rectangle){enemies[j].pos.x, enemies[j].pos.y, 20, 30}))
+			if (enemies[e].status == alive &&
+				CheckCollisionCircleRec(bullets[i].pos, 5, (Rectangle){enemies[e].pos.x, enemies[e].pos.y, enemies[e].width, enemies[e].height}))
 			{
 				// remove bullet
 				if (i != bulletsCount - 1)
@@ -371,9 +397,11 @@ void HandleBullets()
 						bullets[j - 1] = bullets[j];
 
 				bulletsCount--;
-				// remove enemy
-				enemies[j].status = dead;
-				enemies[j].deathTime = 5 * 60;
+				// mark enemy as dead
+				enemies[e].health--;
+				if (enemies[e].health == 0)
+					enemies[e].status = dead;
+				enemies[e].deathTime = 2 * 60;
 			}
 		}
 	}
@@ -383,6 +411,7 @@ void HandleEnemies()
 {
 	for (int i = 0; i < enemiesCount; i++)
 	{
+		// removing enemies after certain time
 		if (enemies[i].deathTime > 0 && enemies[i].status == dead)
 			enemies[i].deathTime--;
 
@@ -391,7 +420,20 @@ void HandleEnemies()
 			if (i != enemiesCount - 1)
 				for (int j = i + 1; j < enemiesCount; j++)
 					enemies[j - 1] = enemies[j];
+
+			enemiesCount--;
 		};
+
+		// enemies and character collison
+		if (CheckCollisionRecs(
+				(Rectangle){character.pos.x, character.pos.y, character.width, character.height},
+				(Rectangle){enemies[i].pos.x, enemies[i].pos.y, enemies[i].width, enemies[i].height}))
+		{
+			character.health--;
+			// tricky
+			character.pos.x -= 10;
+			// if collision with cover //TODO:
+		}
 	}
 }
 
