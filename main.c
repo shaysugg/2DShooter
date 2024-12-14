@@ -8,11 +8,14 @@
 #define WWidth 950
 #define WHeight 450
 
-#define COVER_COUNT 3
+#define COVER_COUNT 1
 #define BULLETS_MAX_COUNT 100
 #define ENEMIES_MAX_COUNT 50
+#define ENEMY_DEATH_TIME 2
+#define ENEMY_PUSH_BACK 30
 
 const double coverMargin = 10;
+float groundPosV;
 
 typedef enum CharacterMovement
 {
@@ -102,8 +105,9 @@ void HandleEnemies();
 void DrawCharacter();
 void DrawEnemy(Enemy);
 void DrawCover(Cover);
+void DrawUI();
 
-void PutCharacterInCover(Character *, Cover);
+void PutCharacterBehindCover(Character *, Cover);
 void PassCharacterOverCover(Character *, Cover);
 
 Rectangle GetCharacterRectangle(Character character);
@@ -153,6 +157,9 @@ int main()
 		for (int i = 0; i < enemiesCount; i++)
 			DrawEnemy(enemies[i]);
 
+		DrawLine(0, groundPosV, GetScreenWidth(), groundPosV, BLACK);
+		DrawUI();
+
 		EndDrawing();
 	}
 
@@ -162,7 +169,7 @@ int main()
 
 void LoadInitial()
 {
-	float groundPosV = GetScreenHeight() / 2 + 100;
+	groundPosV = GetScreenHeight() / 2 + 100;
 	float cHeight = 255 / 4;
 	float cWidth = 175 / 3;
 	character = (Character){
@@ -176,11 +183,11 @@ void LoadInitial()
 		.height = cHeight,
 		.health = 5};
 
-	enemiesCount = 5;
+	enemiesCount = 1;
 	for (int i = 0; i < enemiesCount; i++)
 		enemies[i] = (Enemy){
 			.pos = (Vector2){
-				(i + 1) * 120,
+				(i + 1) * 380,
 				groundPosV - cHeight,
 			},
 			.status = alive,
@@ -189,7 +196,7 @@ void LoadInitial()
 			.height = cHeight,
 			.health = 1};
 
-	float coverHeight = 50;
+	float coverHeight = 70;
 	float coverWidth = 20;
 	for (int i = 0; i < COVER_COUNT; i++)
 		covers[i] = (Cover){(Rectangle){(i + 1) * 100, groundPosV - coverHeight, coverWidth, coverHeight}};
@@ -233,13 +240,19 @@ void DrawCharacter()
 
 void DrawCover(Cover cover)
 {
-	DrawRectangle(cover.rec.x, cover.rec.y, cover.rec.width, 60, DARKGRAY);
+	DrawRectangleRec(cover.rec, DARKGRAY);
 }
 
 void DrawEnemy(Enemy enemy)
 {
 	DrawRectangleRec((Rectangle){enemy.pos.x, enemy.pos.y, enemy.fa.currentRec.width, enemy.fa.currentRec.height}, enemy.status == dead ? RED : YELLOW);
 	DrawFrameAnimator(enemy.fa, enemy.pos);
+}
+
+void DrawUI()
+{
+	DrawRectangle(0, 0, GetScreenWidth(), 30, ColorAlpha(DARKGRAY, 200));
+	DrawText(TextFormat("Health: %d", character.health), 10, 10, 10, WHITE);
 }
 
 void HandleCharacterMovements()
@@ -270,14 +283,14 @@ void HandleCharacterMovements()
 		{
 			character.movement = blocked;
 			character.behindCover = covers[i];
-			PutCharacterInCover(&character, covers[i]);
+			PutCharacterBehindCover(&character, covers[i]);
 		}
 
 		if (DistanceBetweenRectanglesX(GetCharacterRectangle(character), covers[i].rec) < coverMargin && IsKeyPressed(KEY_C))
 		{
 			character.movement = cover;
 			character.behindCover = covers[i];
-			PutCharacterInCover(&character, character.behindCover);
+			PutCharacterBehindCover(&character, character.behindCover);
 		}
 	}
 
@@ -401,7 +414,7 @@ void HandleBullets()
 				enemies[e].health--;
 				if (enemies[e].health == 0)
 					enemies[e].status = dead;
-				enemies[e].deathTime = 2 * 60;
+				enemies[e].deathTime = ENEMY_DEATH_TIME * 60;
 			}
 		}
 	}
@@ -430,14 +443,13 @@ void HandleEnemies()
 				(Rectangle){enemies[i].pos.x, enemies[i].pos.y, enemies[i].width, enemies[i].height}))
 		{
 			character.health--;
-			// tricky
-			character.pos.x -= 10;
-			// if collision with cover //TODO:
+
+			character.pos.x -= ENEMY_PUSH_BACK;
 		}
 	}
 }
 
-void PutCharacterInCover(Character *character, Cover cover)
+void PutCharacterBehindCover(Character *character, Cover cover)
 {
 
 	if (character->pos.x < cover.rec.x)
