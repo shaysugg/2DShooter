@@ -7,9 +7,11 @@
 
 #define WWidth 950
 #define WHeight 450
+#define FPS 60
 
 #define COVER_COUNT 1
 #define BULLETS_MAX_COUNT 100
+#define ENEMIES_BULLETS_MAX_COUNT 100
 #define ENEMIES_MAX_COUNT 50
 #define ENEMY_DEATH_TIME 2
 #define ENEMY_PUSH_BACK 30
@@ -67,16 +69,30 @@ typedef struct Bullet
 	float angle;
 	float distance;
 	float speed;
+	Vector2 initPos;
 } Bullet;
 
 Bullet bullets[BULLETS_MAX_COUNT] = {};
 int bulletsCount = 0;
+
+Bullet enemiesBullets[ENEMIES_BULLETS_MAX_COUNT] = {};
+int enemiesBulletsCount = 0;
 
 typedef enum EnemyStatus
 {
 	alive,
 	dead
 } EnemyStatus;
+
+typedef struct EnemyShooting
+{
+	float shootingCoolDownTime;
+	float shootingDelay;
+	float numberOfBullets;
+	float currentShootingCoolDownTime;
+	float currentShootingDelay;
+	float currentNumberOfBullets;
+} EnemyShooting;
 
 typedef struct Enemy
 {
@@ -87,6 +103,8 @@ typedef struct Enemy
 	EnemyStatus status;
 	int deathTime;
 	int health;
+	EnemyShooting *shooting;
+
 } Enemy;
 
 Enemy enemies[ENEMIES_MAX_COUNT] = {};
@@ -101,6 +119,9 @@ void UpdateAnimations();
 void HandleBullets();
 void HandleCharacterShooting();
 void HandleEnemies();
+void UpdateBulletPosition(Bullet *bullet);
+void RemoveBullet(int index, Bullet from[], int *bulletCount);
+void HandleEnemyShooting(EnemyShooting *shooting, Vector2 enemYPos);
 
 void DrawCharacter();
 void DrawEnemy(Enemy);
@@ -112,6 +133,10 @@ void PassCharacterOverCover(Character *, Cover);
 
 Rectangle GetCharacterRectangle(Character character);
 float DistanceBetweenRectanglesX(Rectangle rec1, Rectangle rec2);
+float DistanceBetweenRectanglesX(Rectangle rec1, Rectangle rec2);
+
+Vector2 CharacterCenter(Character);
+Vector2 EnemyCenter(Enemy);
 
 int main()
 {
@@ -120,7 +145,7 @@ int main()
 	camera.rotation = 0;
 	camera.zoom = 1;
 
-	SetTargetFPS(60);
+	SetTargetFPS(FPS);
 	InitWindow(WWidth, WHeight, "2DShooter");
 
 	LoadInitial();
@@ -154,6 +179,9 @@ int main()
 		for (int i = 0; i < bulletsCount; i++)
 			DrawCircleV(bullets[i].pos, 2, RED);
 
+		for (int i = 0; i < enemiesBulletsCount; i++)
+			DrawCircleV(enemiesBullets[i].pos, 2, BLACK);
+
 		for (int i = 0; i < enemiesCount; i++)
 			DrawEnemy(enemies[i]);
 
@@ -164,6 +192,12 @@ int main()
 	}
 
 	UnloadTexture(character.fa.texture);
+
+	// TODO: is this working correct
+	for (int i = 0; i < enemiesCount; i++)
+		free(enemies[i].shooting);
+
+	// TODO more free when we have alloc
 	CloseWindow();
 }
 
@@ -183,18 +217,27 @@ void LoadInitial()
 		.height = cHeight,
 		.health = 5};
 
-	enemiesCount = 1;
+	enemiesCount = 3;
 	for (int i = 0; i < enemiesCount; i++)
+	{
+		EnemyShooting *shooting = (EnemyShooting *)malloc(sizeof(EnemyShooting));
+		shooting->numberOfBullets = 3,
+		shooting->shootingCoolDownTime = 2 * FPS,
+		shooting->shootingDelay = 0.2 * FPS,
+
 		enemies[i] = (Enemy){
 			.pos = (Vector2){
-				(i + 1) * 380,
-				groundPosV - cHeight,
+				(i + 1) * 180,
+				groundPosV - cHeight + (i % 2 == 0 ? 100 : -100),
 			},
 			.status = alive,
 			.deathTime = -1,
 			.width = cWidth,
 			.height = cHeight,
-			.health = 1};
+			.health = 1,
+			.shooting = shooting,
+		};
+	}
 
 	float coverHeight = 70;
 	float coverWidth = 20;
@@ -234,7 +277,7 @@ void UpdateAnimations()
 
 void DrawCharacter()
 {
-	DrawRectangleRec(GetCharacterRectangle(character), YELLOW);
+	DrawRectangleRec(GetCharacterRectangle(character), character.health > 0 ? YELLOW : ORANGE);
 	DrawFrameAnimator(character.fa, character.pos);
 }
 
@@ -253,6 +296,17 @@ void DrawUI()
 {
 	DrawRectangle(0, 0, GetScreenWidth(), 30, ColorAlpha(DARKGRAY, 200));
 	DrawText(TextFormat("Health: %d", character.health), 10, 10, 10, WHITE);
+
+	DrawText(TextFormat("Enemy cool down: %f", enemies[0].shooting->currentShootingCoolDownTime), 10, 20, 10, WHITE);
+	DrawText(TextFormat("Enemy shooting delay: %f", enemies[0].shooting->currentShootingDelay), 10, 30, 10, WHITE);
+	DrawText(TextFormat("Enemy number of bullets delayyy: %f", enemies[0].shooting->currentNumberOfBullets), 10, 40, 10, WHITE);
+	DrawText(TextFormat("bc: %d", enemiesBulletsCount), 10, 50, 10, WHITE);
+	DrawText(TextFormat("bc: %d", bulletsCount), 10, 60, 10, WHITE);
+	// if (enemiesBulletsCount > 0)
+	// {
+
+	// 	DrawText(TextFormat("b: %f , %f", enemiesBullets[0].pos.x, enemiesBullets[0].pos.y), 10, 60, 10, WHITE);
+	// }
 }
 
 void HandleCharacterMovements()
@@ -358,7 +412,7 @@ void HandleCharacterShooting()
 	{
 		struct Bullet bullet = {
 			.distance = 0,
-			.pos = (Vector2){character.pos.x + character.width, character.pos.y + character.height / 2},
+			.initPos = (Vector2){character.pos.x + character.width, character.pos.y + character.height / 2},
 			.speed = 8};
 
 		if (character.aiming != NULL)
@@ -380,22 +434,80 @@ void HandleCharacterShooting()
 	}
 }
 
+void HandleEnemyShooting(EnemyShooting *shooting, Vector2 enemyCenter)
+{
+	// improve this shit
+	// try to apply const on necessary variables
+	if (shooting->currentShootingCoolDownTime == 0)
+	{
+		if (shooting->currentShootingDelay == 0)
+		{
+			if (shooting->currentNumberOfBullets == 0)
+			{
+				// restart
+				shooting->currentShootingCoolDownTime = shooting->shootingCoolDownTime;
+				shooting->currentNumberOfBullets = shooting->numberOfBullets;
+				shooting->currentShootingDelay = shooting->shootingDelay;
+			}
+			else
+			{
+				shooting->currentShootingDelay = shooting->shootingDelay;
+				shooting->currentNumberOfBullets--;
+
+				// shoot
+				if (enemiesBulletsCount < ENEMIES_BULLETS_MAX_COUNT)
+				{
+					Vector2 characterCenter = CharacterCenter(character);
+					enemiesBulletsCount++;
+					enemiesBullets[enemiesBulletsCount - 1] = (Bullet){
+						.angle = RAD2DEG * atan((enemyCenter.y - characterCenter.y) / (enemyCenter.x - characterCenter.x)) + (characterCenter.x < enemyCenter.x ? 180 : 0),
+						.initPos = enemyCenter,
+						.speed = 6};
+				}
+			}
+		}
+		else
+		{
+			shooting->currentShootingDelay--;
+		}
+	}
+	else
+	{
+		shooting->currentShootingCoolDownTime--;
+	}
+}
+
 void HandleBullets()
 {
+	for (int i = 0; i < enemiesBulletsCount; i++)
+	{
+		UpdateBulletPosition(&enemiesBullets[i]);
+
+		if (enemiesBullets[i].pos.x > WWidth || enemiesBullets[i].pos.x < 0 || enemiesBullets[i].pos.y < 0 || enemiesBullets[i].pos.y > WHeight)
+		{
+			RemoveBullet(i, enemiesBullets, &enemiesBulletsCount);
+		}
+
+		// check if bullets collide with character
+		if (CheckCollisionCircleRec(enemiesBullets[i].pos, 5, GetCharacterRectangle(character)))
+		{
+			// TODO: FIX
+			if (character.behindCover.rec.x != 0 || character.aiming != NULL)
+			{
+				RemoveBullet(i, enemiesBullets, &enemiesBulletsCount);
+				character.health--;
+			}
+		};
+	}
+
 	for (int i = 0; i < bulletsCount; i++)
 	{
-		bullets[i].distance += bullets[i].speed;
-		bullets[i].pos.x = cosf(bullets[i].angle * DEG2RAD) * bullets[i].distance + character.pos.x;
-		bullets[i].pos.y = sinf(bullets[i].angle * DEG2RAD) * bullets[i].distance + character.pos.y;
+		UpdateBulletPosition(&bullets[i]);
 
 		// check if it can be removed from bullets cache
-		if (bullets[i].pos.x > WWidth || bullets[i].pos.y > WHeight)
+		if (bullets[i].pos.x > WWidth || bullets[i].pos.x < 0 || bullets[i].pos.y < 0 || bullets[i].pos.y > WHeight)
 		{
-			if (i != bulletsCount - 1)
-				for (int j = i + 1; j < bulletsCount; j++)
-					bullets[j - 1] = bullets[j];
-
-			bulletsCount--;
+			RemoveBullet(i, bullets, &bulletsCount);
 		}
 
 		// check if bullets collide with an enemy
@@ -405,11 +517,7 @@ void HandleBullets()
 				CheckCollisionCircleRec(bullets[i].pos, 5, (Rectangle){enemies[e].pos.x, enemies[e].pos.y, enemies[e].width, enemies[e].height}))
 			{
 				// remove bullet
-				if (i != bulletsCount - 1)
-					for (int j = i + 1; j < bulletsCount; j++)
-						bullets[j - 1] = bullets[j];
-
-				bulletsCount--;
+				RemoveBullet(i, bullets, &bulletsCount);
 				// mark enemy as dead
 				enemies[e].health--;
 				if (enemies[e].health == 0)
@@ -418,6 +526,23 @@ void HandleBullets()
 			}
 		}
 	}
+}
+
+void UpdateBulletPosition(Bullet *bullet)
+{
+	bullet->distance += bullet->speed;
+	bullet->pos.x = cosf(bullet->angle * DEG2RAD) * bullet->distance + bullet->initPos.x;
+	bullet->pos.y = sinf(bullet->angle * DEG2RAD) * bullet->distance + bullet->initPos.y;
+}
+
+void RemoveBullet(int index, Bullet from[], int *bc)
+{
+	if (index != *bc - 1)
+		for (int j = index + 1; j < *bc; j++)
+			from[j - 1] = from[j];
+
+	int temp = *bc;
+	*bc = temp - 1;
 }
 
 void HandleEnemies()
@@ -446,6 +571,9 @@ void HandleEnemies()
 
 			character.pos.x -= ENEMY_PUSH_BACK;
 		}
+
+		if (enemies[i].status == alive)
+			HandleEnemyShooting(enemies[i].shooting, EnemyCenter(enemies[i]));
 	}
 }
 
@@ -481,4 +609,14 @@ float DistanceBetweenRectanglesX(Rectangle rec1, Rectangle rec2)
 		return rec2.x - (rec1.x + rec1.width);
 	else
 		return rec1.x - (rec2.x + rec2.width);
+}
+
+Vector2 CharacterCenter(Character character)
+{
+	return (Vector2){character.pos.x + character.width / 2, character.pos.y + character.height / 2};
+}
+
+Vector2 EnemyCenter(Enemy enemy)
+{
+	return (Vector2){enemy.pos.x + enemy.width / 2, enemy.pos.y + enemy.height / 2};
 }
